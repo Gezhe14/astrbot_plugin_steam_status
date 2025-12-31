@@ -57,7 +57,7 @@ class SteamStatusMonitorPlugin(Star):
                 # 复用 self.client
                 response = await self.client.get(url)
                 if 200 <= response.status_code < 400:
-                    return "OK", f"✅ 正常 ({response.status_code})"
+                    return "OK", "✅ 正常"
                 else:
                     last_result = ("HTTP_ERR", f"❌ 异常 (HTTP {response.status_code})")
             except httpx.RequestError as e:
