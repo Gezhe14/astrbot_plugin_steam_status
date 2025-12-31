@@ -40,15 +40,17 @@ class SteamStatusMonitorPlugin(Star):
         except Exception as e:
             logger.error(f"[SteamStatus] 插件停止时出错: {e}")
 
-    async def fetch_status(self, url: str) -> tuple[str, str]:
+    async def fetch_status(self, url: str, retry_count: int = None, retry_delay: int = None) -> tuple[str, str]:
         """执行网络请求检测状态
         Returns:
             (status_type, description)
             status_type: "OK" | "HTTP_ERR" | "NET_ERR"
         """
         # 获取重试配置
-        retry_count = self.config.get("retry_count", 2)
-        retry_delay = self.config.get("retry_delay", 5)
+        if retry_count is None:
+            retry_count = self.config.get("retry_count", 2)
+        if retry_delay is None:
+            retry_delay = self.config.get("retry_delay", 5)
         
         last_result = ("NET_ERR", "❌ 未知错误")
 
@@ -192,7 +194,8 @@ class SteamStatusMonitorPlugin(Star):
         
         # 并发请求
         # statuses 结构: list of (status_type, description)
-        statuses = await asyncio.gather(*(self.fetch_status(url) for url in urls))
+        # 手动查询时不重试，以提高响应速度
+        statuses = await asyncio.gather(*(self.fetch_status(url, retry_count=0) for url in urls))
         
         # 直接使用返回的 description
         results = [f"{name}: {description}" for name, (_, description) in zip(names, statuses)]
