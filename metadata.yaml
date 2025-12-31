@@ -1,6 +1,6 @@
 name: astrbot_plugin_steam_status
 display_name: Steam服务状态监控
 desc: 一个用于 AstrBot 的 Steam 服务状态监控插件。支持手动指令查询和后台自动监控推送。
-version: v1.1.1
+version: v1.2.0
 author: Gezhe14
 repo: https://github.com/Gezhe14/astrbot_plugin_steam_status

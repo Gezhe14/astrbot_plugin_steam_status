@@ -5,12 +5,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 import astrbot.api.message_components as Comp
 from astrbot.api import logger, AstrBotConfig
 
-# 自定义包装类，用于满足 Context.send_message 对参数对象必须有 .chain 属性的要求
-class MessageChainWrapper:
-    def __init__(self, components=None):
-        self.chain = components or []
-
-@register("steam_status_monitor", "Gezhe14", "显示Steam服务器目前状态", "1.1.1")
+@register("steam_status_monitor", "Gezhe14", "显示Steam服务器目前状态", "1.2.0")
 class SteamStatusMonitorPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -21,6 +16,9 @@ class SteamStatusMonitorPlugin(Star):
             "Steam API": "https://api.steampowered.com/ISteamWebAPIUtil/GetServerInfo/v1/"
         }
         self.last_status = {name: True for name in self.targets}
+        
+        # 创建共享的 HTTP 客户端
+        self.client = httpx.AsyncClient(timeout=10.0)
         
         # 启动后台监控协程，并保存句柄以便销毁
         self.monitor_task = asyncio.create_task(self.monitor_loop())
@@ -35,16 +33,19 @@ class SteamStatusMonitorPlugin(Star):
                     await self.monitor_task
                 except asyncio.CancelledError:
                     pass
-            logger.info("[SteamStatus] 监控任务已停止")
+            
+            # 关闭 HTTP 客户端
+            await self.client.aclose()
+            logger.info("[SteamStatus] 监控任务已停止，资源已释放")
         except Exception as e:
             logger.error(f"[SteamStatus] 插件停止时出错: {e}")
 
     async def fetch_status(self, url: str) -> bool:
         """执行网络请求检测状态"""
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(url)
-                return 200 <= response.status_code < 400
+            # 复用 self.client
+            response = await self.client.get(url)
+            return 200 <= response.status_code < 400
         except Exception:
             return False
 
@@ -52,6 +53,13 @@ class SteamStatusMonitorPlugin(Star):
         """核心监控循环逻辑"""
         # 启动时等待 10 秒，确保 AstrBot 平台连接就绪
         await asyncio.sleep(10)
+
+        # 输出当前配置信息
+        logger.info(f"[SteamStatus] 监控任务已启动。当前加载配置：\n"
+                    f"  - 自动监控开关 (auto_check): {'开启' if self.config.get('auto_check', False) else '关闭'}\n"
+                    f"  - 检测间隔 (check_interval): {self.config.get('check_interval', 5)} 分钟\n"
+                    f"  - 自动推送目标 (auto_push_groups): {self.config.get('auto_push_groups', [])}\n"
+                    f"  - 指令允许群组 (allowed_groups): {self.config.get('allowed_groups', [])}")
         
         has_logged_disabled = False
 
@@ -62,7 +70,7 @@ class SteamStatusMonitorPlugin(Star):
                 is_master_on = self.config.get("auto_check", False)
                 # 获取推送到部分群的名单
                 push_list = self.config.get("auto_push_groups", [])
-                interval = self.config.get("check_interval", 5)
+                interval = self.config.get("check_interval", 1)
 
                 # 只有全局开关开启且推送名单不为空时才执行
                 if is_master_on and push_list:
@@ -70,8 +78,13 @@ class SteamStatusMonitorPlugin(Star):
                     has_logged_disabled = False
                     
                     changes = []
-                    for name, url in self.targets.items():
-                        current_is_ok = await self.fetch_status(url)
+                    names = list(self.targets.keys())
+                    urls = list(self.targets.values())
+                    
+                    # 并发请求以提高性能
+                    results = await asyncio.gather(*(self.fetch_status(url) for url in urls))
+                    
+                    for name, current_is_ok in zip(names, results):
                         if current_is_ok != self.last_status[name]:
                             state_msg = "✅ 已恢复正常" if current_is_ok else "❌ 出现访问故障"
                             changes.append(f"{name}: {state_msg}")
@@ -83,13 +96,15 @@ class SteamStatusMonitorPlugin(Star):
                         
                         # 构建消息组件列表
                         components = [Comp.Plain(notice_text)]
-                        # 使用包装类封装
-                        message_obj = MessageChainWrapper(components)
+                        # 使用 AstrBot 定义的 MessageChain
+                        message_obj = Comp.MessageChain(components)
                         
                         for unified_id in push_list:
                             try:
                                 logger.info(f"[SteamStatus] 正在推送消息到: {unified_id}")
-                                await self.context.send_message(str(unified_id).strip(), message_obj)
+                                # 确保 unified_id 为字符串
+                                target_id = str(unified_id).strip()
+                                await self.context.send_message(target_id, message_obj)
                             except Exception as e:
                                 logger.error(f"定时推送失败，目标: {unified_id}，错误: {e}")
                 else:
@@ -106,20 +121,29 @@ class SteamStatusMonitorPlugin(Star):
     @filter.command("steamstatus")
     async def on_steam_status(self, event: AstrMessageEvent):
         """处理手动查询指令"""
-        # 获取允许使用指令的群名单
-        allowed_groups = self.config.get("allowed_groups", [])
-        current_id = event.unified_msg_origin
+        # 获取允许使用指令的群名单，并统一转换为字符串以确保类型安全
+        raw_allowed = self.config.get("allowed_groups", [])
+        allowed_groups = [str(g) for g in raw_allowed]
         
-        # 权限校验：如果名单为空，或者当前群不在名单内，则全部拦截
-        if not allowed_groups or current_id not in allowed_groups:
+        current_id = str(event.unified_msg_origin)
+        
+        # 权限校验：如果名单为空，或者当前群不在名单内，则全部拦截 (白名单模式)
+        if not allowed_groups:
+             logger.warning("[SteamStatus] 允许的群组列表为空 (allowed_groups)，所有指令将被拦截。请在配置中添加允许的群组 ID。")
+             return
+
+        if current_id not in allowed_groups:
             logger.info(f"拦截到未授权群组 {current_id} 的指令请求")
             return
 
         yield event.plain_result("正在检测 Steam 服务状态，请稍候...")
         
-        results = []
-        for name, url in self.targets.items():
-            is_ok = await self.fetch_status(url)
-            results.append(f"{name}: {'✅ 正常' if is_ok else '❌ 异常'}")
+        names = list(self.targets.keys())
+        urls = list(self.targets.values())
+        
+        # 并发请求
+        statuses = await asyncio.gather(*(self.fetch_status(url) for url in urls))
+        
+        results = [f"{name}: {'✅ 正常' if is_ok else '❌ 异常'}" for name, is_ok in zip(names, statuses)]
         
         yield event.plain_result("📊 Steam 当前状态报告：\n" + "\n".join(results))
