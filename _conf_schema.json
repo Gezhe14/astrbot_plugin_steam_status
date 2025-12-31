@@ -12,23 +12,15 @@
       "default": 1
   },
   "allowed_groups": {
-      "description": "指令权限名单",
+      "description": "指令权限白名单群组",
       "type": "list",
-      "hint": "允许使用 /steamstatus 的统一标识符列表。示例: napcat:GroupMessage:123456",
-      "obvious_hint": true,
-      "items": {
-          "type": "string"
-      },
+      "hint": "允许使用 /steamstatus 的群组统一标识符列表。示例: napcat:GroupMessage:123456，为空则都不允许",
       "default": []
   },
   "auto_push_groups": {
       "description": "自动推送目标名单",
       "type": "list",
-      "hint": "接收状态变更自动通知的统一标识符列表。示例: napcat:GroupMessage:123456",
-      "obvious_hint": true,
-      "items": {
-          "type": "string"
-      },
+      "hint": "接收状态变更自动通知的群组统一标识符列表。示例: napcat:GroupMessage:123456，为空则都不推送",
       "default": []
   }
 }

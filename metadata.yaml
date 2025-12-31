@@ -1,6 +1,6 @@
 name: astrbot_plugin_steam_status
 display_name: Steam服务器状态显示
 desc: 显示Steam服务器目前状态
-version: v1.0.0
-author: qiyi
+version: v1.1.0
+author: Gezhe14
 repo: https://github.com/Gezhe14/astrbot_plugin_steam_status
