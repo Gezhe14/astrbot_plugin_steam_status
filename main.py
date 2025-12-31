@@ -5,7 +5,7 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageChain
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
 
-@register("steam_status_monitor", "Gezhe14", "显示Steam服务器目前状态", "1.2.1")
+@register("steam_status_monitor", "Gezhe14", "显示Steam服务器目前状态", "1.2.2")
 class SteamStatusMonitorPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -59,7 +59,8 @@ class SteamStatusMonitorPlugin(Star):
                     f"  - 自动监控开关 (auto_check): {'开启' if self.config.get('auto_check', False) else '关闭'}\n"
                     f"  - 检测间隔 (check_interval): {self.config.get('check_interval', 1)} 分钟\n"
                     f"  - 自动推送目标 (auto_push_groups): {self.config.get('auto_push_groups', [])}\n"
-                    f"  - 指令允许群组 (allowed_groups): {self.config.get('allowed_groups', [])}")
+                    f"  - 指令权限模式 (permission_mode): {self.config.get('permission_mode', 'whitelist')}\n"
+                    f"  - 指令权限列表 (allowed_groups): {self.config.get('allowed_groups', [])}")
         
         has_logged_disabled = False
 
@@ -121,20 +122,29 @@ class SteamStatusMonitorPlugin(Star):
     @filter.command("steamstatus")
     async def on_steam_status(self, event: AstrMessageEvent):
         """处理手动查询指令"""
-        # 获取允许使用指令的群名单，并统一转换为字符串以确保类型安全
-        raw_allowed = self.config.get("allowed_groups", [])
-        allowed_groups = [str(g) for g in raw_allowed]
+        # 获取权限模式
+        mode = self.config.get("permission_mode", "whitelist")
+        
+        # 获取群名单，并统一转换为字符串以确保类型安全
+        raw_groups = self.config.get("allowed_groups", [])
+        permission_groups = [str(g) for g in raw_groups]
         
         current_id = str(event.unified_msg_origin)
         
-        # 权限校验：如果名单为空，或者当前群不在名单内，则全部拦截 (白名单模式)
-        if not allowed_groups:
-             logger.warning("[SteamStatus] 允许的群组列表为空 (allowed_groups)，所有指令将被拦截。请在配置中添加允许的群组 ID。")
-             return
-
-        if current_id not in allowed_groups:
-            logger.info(f"拦截到未授权群组 {current_id} 的指令请求")
-            return
+        # 权限校验
+        if mode == "whitelist":
+            # 白名单模式：如果名单为空，或者当前群不在名单内，则拦截
+            if not permission_groups:
+                 logger.warning("[SteamStatus] 白名单模式下列表为空，所有指令将被拦截。请在配置中添加允许的群组 ID。")
+                 return
+            if current_id not in permission_groups:
+                logger.info(f"拦截到未授权群组 {current_id} 的指令请求 (不在白名单)")
+                return
+        else:
+            # 黑名单模式：如果当前群在名单内，则拦截
+            if current_id in permission_groups:
+                logger.info(f"拦截到黑名单群组 {current_id} 的指令请求")
+                return
 
         yield event.plain_result("正在检测 Steam 服务状态，请稍候...")
         

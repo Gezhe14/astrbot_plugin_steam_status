@@ -11,10 +11,17 @@
       "hint": "每隔多少分钟执行一次自动状态巡检",
       "default": 1
   },
+  "permission_mode": {
+      "description": "指令权限模式",
+      "type": "string",
+      "options": ["whitelist", "blacklist"],
+      "default": "whitelist",
+      "hint": "whitelist: 白名单模式（仅列表内可用）；blacklist: 黑名单模式（列表内不可用，其他可用）"
+  },
   "allowed_groups": {
-      "description": "指令权限白名单群组",
+      "description": "指令权限群组列表",
       "type": "list",
-      "hint": "允许使用 /steamstatus 的群组统一标识符列表。示例: napcat:GroupMessage:123456，为空则都不允许",
+      "hint": "配合权限模式使用。白名单模式下为允许列表，黑名单模式下为禁止列表。示例: napcat:GroupMessage:123456",
       "default": []
   },
   "auto_push_groups": {
