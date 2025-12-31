@@ -10,7 +10,7 @@ class MessageChainWrapper:
     def __init__(self, components=None):
         self.chain = components or []
 
-@register("steam_status_monitor", "Gezhe14", "显示Steam服务器目前状态", "1.1.0")
+@register("steam_status_monitor", "Gezhe14", "显示Steam服务器目前状态", "1.1.1")
 class SteamStatusMonitorPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -83,7 +83,7 @@ class SteamStatusMonitorPlugin(Star):
                         
                         # 构建消息组件列表
                         components = [Comp.Plain(notice_text)]
-                        # 使用包装类封装，骗过 send_message 的检查
+                        # 使用包装类封装
                         message_obj = MessageChainWrapper(components)
                         
                         for unified_id in push_list:
@@ -115,7 +115,7 @@ class SteamStatusMonitorPlugin(Star):
             logger.info(f"拦截到未授权群组 {current_id} 的指令请求")
             return
 
-        yield event.plain_result("正在检测 Steam 服务质量，请稍候...")
+        yield event.plain_result("正在检测 Steam 服务状态，请稍候...")
         
         results = []
         for name, url in self.targets.items():
