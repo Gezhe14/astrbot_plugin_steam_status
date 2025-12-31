@@ -40,14 +40,37 @@ class SteamStatusMonitorPlugin(Star):
         except Exception as e:
             logger.error(f"[SteamStatus] 插件停止时出错: {e}")
 
-    async def fetch_status(self, url: str) -> bool:
-        """执行网络请求检测状态"""
-        try:
-            # 复用 self.client
-            response = await self.client.get(url)
-            return 200 <= response.status_code < 400
-        except Exception:
-            return False
+    async def fetch_status(self, url: str) -> tuple[str, str]:
+        """执行网络请求检测状态
+        Returns:
+            (status_type, description)
+            status_type: "OK" | "HTTP_ERR" | "NET_ERR"
+        """
+        # 获取重试配置
+        retry_count = self.config.get("retry_count", 2)
+        retry_delay = self.config.get("retry_delay", 5)
+        
+        last_result = ("NET_ERR", "❌ 未知错误")
+
+        for attempt in range(retry_count + 1):
+            try:
+                # 复用 self.client
+                response = await self.client.get(url)
+                if 200 <= response.status_code < 400:
+                    return "OK", f"✅ 正常 ({response.status_code})"
+                else:
+                    last_result = ("HTTP_ERR", f"❌ 异常 (HTTP {response.status_code})")
+            except httpx.RequestError as e:
+                # 捕获网络层面的错误（DNS, 连接超时, 拒绝连接等）
+                last_result = ("NET_ERR", f"❌ 网络错误 ({type(e).__name__})")
+            except Exception as e:
+                last_result = ("NET_ERR", f"❌ 未知错误 ({type(e).__name__})")
+            
+            # 如果不是最后一次尝试，则等待后重试
+            if attempt < retry_count:
+                await asyncio.sleep(retry_delay)
+        
+        return last_result
 
     async def monitor_loop(self):
         """核心监控循环逻辑"""
@@ -59,6 +82,8 @@ class SteamStatusMonitorPlugin(Star):
                     f"  - 自动监控开关 (auto_check): {'开启' if self.config.get('auto_check', False) else '关闭'}\n"
                     f"  - 检测间隔 (check_interval): {self.config.get('check_interval', 1)} 分钟\n"
                     f"  - 自动推送目标 (auto_push_groups): {self.config.get('auto_push_groups', [])}\n"
+                    f"  - 失败重试次数 (retry_count): {self.config.get('retry_count', 2)}\n"
+                    f"  - 重试等待间隔 (retry_delay): {self.config.get('retry_delay', 5)} 秒\n"
                     f"  - 指令权限模式 (permission_mode): {self.config.get('permission_mode', 'whitelist')}\n"
                     f"  - 指令权限列表 (allowed_groups): {self.config.get('allowed_groups', [])}")
         
@@ -83,31 +108,45 @@ class SteamStatusMonitorPlugin(Star):
                     urls = list(self.targets.values())
                     
                     # 并发请求以提高性能
+                    # results 结构: list of (status_type, description)
                     results = await asyncio.gather(*(self.fetch_status(url) for url in urls))
                     
-                    for name, current_is_ok in zip(names, results):
-                        if current_is_ok != self.last_status[name]:
-                            state_msg = "✅ 已恢复正常" if current_is_ok else "❌ 出现访问故障"
-                            changes.append(f"{name}: {state_msg}")
-                            self.last_status[name] = current_is_ok
-                    
-                    if changes:
-                        notice_text = "⚠️ Steam 服务状态变更通知：\n" + "\n".join(changes)
-                        logger.info(f"[SteamStatus] 状态发生变更，准备推送: {changes}")
+                    # 检查是否所有目标都返回了网络错误
+                    net_errors = [r for r in results if r[0] == "NET_ERR"]
+                    if len(net_errors) == len(results):
+                        logger.warning(f"[SteamStatus] 检测到所有目标均无法连接 (NET_ERR)，判定为本地网络故障，跳过本次状态更新。")
+                    else:
+                        for name, (status_type, description) in zip(names, results):
+                            current_is_ok = (status_type == "OK")
+                            
+                            # 状态变更判断
+                            if current_is_ok != self.last_status[name]:
+                                # 如果是恢复正常，直接显示正常
+                                if current_is_ok:
+                                    changes.append(f"{name}: ✅ 已恢复正常")
+                                else:
+                                    # 如果是异常，显示具体错误信息（HTTP错误或网络错误）
+                                    changes.append(f"{name}: {description}")
+                                
+                                self.last_status[name] = current_is_ok
                         
-                        # 构建消息组件列表
-                        components = [Comp.Plain(notice_text)]
-                        # 使用 AstrBot 定义的 MessageChain
-                        message_obj = MessageChain(components)
-                        
-                        for unified_id in push_list:
-                            try:
-                                logger.info(f"[SteamStatus] 正在推送消息到: {unified_id}")
-                                # 确保 unified_id 为字符串
-                                target_id = str(unified_id).strip()
-                                await self.context.send_message(target_id, message_obj)
-                            except Exception as e:
-                                logger.error(f"定时推送失败，目标: {unified_id}，错误: {e}")
+                        if changes:
+                            notice_text = "⚠️ Steam 服务状态变更通知：\n" + "\n".join(changes)
+                            logger.info(f"[SteamStatus] 状态发生变更，准备推送: {changes}")
+                            
+                            # 构建消息组件列表
+                            components = [Comp.Plain(notice_text)]
+                            # 使用 AstrBot 定义的 MessageChain
+                            message_obj = MessageChain(components)
+                            
+                            for unified_id in push_list:
+                                try:
+                                    logger.info(f"[SteamStatus] 正在推送消息到: {unified_id}")
+                                    # 确保 unified_id 为字符串
+                                    target_id = str(unified_id).strip()
+                                    await self.context.send_message(target_id, message_obj)
+                                except Exception as e:
+                                    logger.error(f"定时推送失败，目标: {unified_id}，错误: {e}")
                 else:
                     # 仅在从未记录过时打印，避免刷屏
                     if not has_logged_disabled:
@@ -117,7 +156,7 @@ class SteamStatusMonitorPlugin(Star):
             except Exception as e:
                 logger.error(f"Steam 监控循环发生错误: {e}")
 
-            await asyncio.sleep(interval * 60)
+            await asyncio.sleep(interval * 60) # 转换为秒
 
     @filter.command("steamstatus")
     async def on_steam_status(self, event: AstrMessageEvent):
@@ -152,8 +191,10 @@ class SteamStatusMonitorPlugin(Star):
         urls = list(self.targets.values())
         
         # 并发请求
+        # statuses 结构: list of (status_type, description)
         statuses = await asyncio.gather(*(self.fetch_status(url) for url in urls))
         
-        results = [f"{name}: {'✅ 正常' if is_ok else '❌ 异常'}" for name, is_ok in zip(names, statuses)]
+        # 直接使用返回的 description
+        results = [f"{name}: {description}" for name, (_, description) in zip(names, statuses)]
         
         yield event.plain_result("📊 Steam 当前状态报告：\n" + "\n".join(results))

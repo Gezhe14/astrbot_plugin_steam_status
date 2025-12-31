@@ -11,6 +11,18 @@
       "hint": "每隔多少分钟执行一次自动状态巡检",
       "default": 1
   },
+  "retry_count": {
+      "description": "失败重试次数",
+      "type": "int",
+      "hint": "网络请求失败或异常时的重试次数，建议设置为 2-3 次",
+      "default": 2
+  },
+  "retry_delay": {
+      "description": "重试间隔（秒）",
+      "type": "int",
+      "hint": "每次重试之间的等待时间（秒）",
+      "default": 5
+  },
   "permission_mode": {
       "description": "指令权限模式",
       "type": "string",
