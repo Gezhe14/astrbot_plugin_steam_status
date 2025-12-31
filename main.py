@@ -1,11 +1,11 @@
 import httpx
 import asyncio
 from astrbot.api.star import Context, Star, register
-from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event import filter, AstrMessageEvent, MessageChain
 import astrbot.api.message_components as Comp
-from astrbot.api import logger, AstrBotConfig
+from astrbot.api import logger
 
-@register("steam_status_monitor", "Gezhe14", "显示Steam服务器目前状态", "1.2.0")
+@register("steam_status_monitor", "Gezhe14", "显示Steam服务器目前状态", "1.2.1")
 class SteamStatusMonitorPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -57,7 +57,7 @@ class SteamStatusMonitorPlugin(Star):
         # 输出当前配置信息
         logger.info(f"[SteamStatus] 监控任务已启动。当前加载配置：\n"
                     f"  - 自动监控开关 (auto_check): {'开启' if self.config.get('auto_check', False) else '关闭'}\n"
-                    f"  - 检测间隔 (check_interval): {self.config.get('check_interval', 5)} 分钟\n"
+                    f"  - 检测间隔 (check_interval): {self.config.get('check_interval', 1)} 分钟\n"
                     f"  - 自动推送目标 (auto_push_groups): {self.config.get('auto_push_groups', [])}\n"
                     f"  - 指令允许群组 (allowed_groups): {self.config.get('allowed_groups', [])}")
         
@@ -97,7 +97,7 @@ class SteamStatusMonitorPlugin(Star):
                         # 构建消息组件列表
                         components = [Comp.Plain(notice_text)]
                         # 使用 AstrBot 定义的 MessageChain
-                        message_obj = Comp.MessageChain(components)
+                        message_obj = MessageChain(components)
                         
                         for unified_id in push_list:
                             try:
